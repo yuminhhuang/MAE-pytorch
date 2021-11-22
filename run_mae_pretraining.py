@@ -125,6 +125,7 @@ def get_model(args):
     model = create_model(
         args.model,
         pretrained=False,
+        input_size=args.input_size,
         drop_path_rate=args.drop_path,
         drop_block_rate=None,
     )

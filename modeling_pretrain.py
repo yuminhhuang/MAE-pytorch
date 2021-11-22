@@ -22,7 +22,8 @@ def trunc_normal_(tensor, mean=0., std=1.):
 
 
 __all__ = [
-    'pretrain_mae_base_patch16_224', 
+    'pretrain_mae_base_patch16_224',
+    'pretrain_mae_base_patch16_input',
     'pretrain_mae_large_patch16_224', 
 ]
 
@@ -40,6 +41,12 @@ class PretrainVisionTransformerEncoder(nn.Module):
 
         self.patch_embed = PatchEmbed(
             img_size=img_size, patch_size=patch_size, in_chans=in_chans, embed_dim=embed_dim)
+
+        print('[ym] -----------------------patch_shape-', self.patch_embed.patch_shape)
+        print('[ym] -----------------------img_size-', self.patch_embed.img_size)
+        print('[ym] -----------------------patch_size-', self.patch_embed.patch_size)
+        print('[ym] -----------------------num_patches-', self.patch_embed.num_patches)
+
         num_patches = self.patch_embed.num_patches
 
         # TODO: Add the cls token
@@ -324,7 +331,31 @@ def pretrain_mae_base_patch16_224(pretrained=False, **kwargs):
         )
         model.load_state_dict(checkpoint["model"])
     return model
- 
+
+@register_model
+def pretrain_mae_base_patch16_input(pretrained=False, input_size=224, **kwargs):
+    model = PretrainVisionTransformer(
+        img_size=input_size,
+        patch_size=16,
+        encoder_embed_dim=768,
+        encoder_depth=12,
+        encoder_num_heads=12,
+        encoder_num_classes=0,
+        decoder_num_classes=768,
+        decoder_embed_dim=384,
+        decoder_depth=4,
+        decoder_num_heads=6,
+        mlp_ratio=4,
+        qkv_bias=True,
+        norm_layer=partial(nn.LayerNorm, eps=1e-6),
+        **kwargs)
+    model.default_cfg = _cfg()
+    if pretrained:
+        checkpoint = torch.load(
+            kwargs["init_ckpt"], map_location="cpu"
+        )
+        model.load_state_dict(checkpoint["model"])
+    return model
 
 @register_model
 def pretrain_mae_large_patch16_224(pretrained=False, **kwargs):
