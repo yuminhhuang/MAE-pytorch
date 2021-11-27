@@ -107,21 +107,54 @@ class Attention(nn.Module):
         return x
 
 
-class Block(nn.Module):
-
-    def __init__(self, dim, num_heads, mlp_ratio=4., qkv_bias=False, qk_scale=None, drop=0., attn_drop=0.,
-                 drop_path=0., init_values=None, act_layer=nn.GELU, norm_layer=nn.LayerNorm,
-                 attn_head_dim=None):
+class AttnMixer(nn.Module):
+    def __init__(self, dim, num_heads, qkv_bias=False, qk_scale=None, drop=0., attn_drop=0., attn_head_dim=None):
         super().__init__()
-        self.norm1 = norm_layer(dim)
         self.attn = Attention(
             dim, num_heads=num_heads, qkv_bias=qkv_bias, qk_scale=qk_scale,
             attn_drop=attn_drop, proj_drop=drop, attn_head_dim=attn_head_dim)
+
+    def forward(self, x):
+        return self.attn(x)
+
+
+class MlpMixer(nn.Module):
+    def __init__(self, num_patches, mlp_ratio=4., drop=0., act_layer=nn.GELU):
+        super().__init__()
+        self.mlp = Mlp(in_features=num_patches, hidden_features=int(num_patches * mlp_ratio), act_layer=act_layer, drop=drop)
+
+    def forward(self, x):
+        return self.mlp(x.transpose(1, 2)).transpose(1, 2)
+
+
+class PoolingMixer(nn.Module):
+    def __init__(self, pool_size=3):
+        super().__init__()
+        self.pool = nn.Pool1d(pool_size, stride=1, padding=pool_size//2, count_include_pad=False)
+
+    def forward(self, x):
+        return x  # TODO self.pool(x) - x
+
+
+class Block(nn.Module):
+
+    def __init__(self, dim, num_patches, num_heads, mlp_ratio=4., qkv_bias=False, qk_scale=None, drop=0., attn_drop=0.,
+                 drop_path=0., init_values=None, act_layer=nn.GELU, norm_layer=nn.LayerNorm,
+                 attn_head_dim=None, mixer='attn'):
+        super().__init__()
+        self.norm1 = norm_layer(dim)
         # NOTE: drop path for stochastic depth, we shall see if this is better than dropout here
         self.drop_path = DropPath(drop_path) if drop_path > 0. else nn.Identity()
         self.norm2 = norm_layer(dim)
         mlp_hidden_dim = int(dim * mlp_ratio)
         self.mlp = Mlp(in_features=dim, hidden_features=mlp_hidden_dim, act_layer=act_layer, drop=drop)
+
+        if mixer == 'attn':
+            self.mixer = AttnMixer(dim=dim, num_heads=num_heads, qkv_bias=qkv_bias, qk_scale=qk_scale, drop=drop, attn_drop=attn_drop, attn_head_dim=attn_head_dim)
+        elif mixer == 'mlp':
+            self.mixer = MlpMixer(num_patches=num_patches, mlp_ratio=mlp_ratio, drop=drop, act_layer=act_layer)
+        elif mixer == 'pooling':
+            self.mixer = PoolingMixer()
 
         if init_values > 0:
             self.gamma_1 = nn.Parameter(init_values * torch.ones((dim)),requires_grad=True)
@@ -131,10 +164,10 @@ class Block(nn.Module):
 
     def forward(self, x):
         if self.gamma_1 is None:
-            x = x + self.drop_path(self.attn(self.norm1(x)))
+            x = x + self.drop_path(self.mixer(self.norm1(x)))
             x = x + self.drop_path(self.mlp(self.norm2(x)))
         else:
-            x = x + self.drop_path(self.gamma_1 * self.attn(self.norm1(x)))
+            x = x + self.drop_path(self.gamma_1 * self.mixer(self.norm1(x)))
             x = x + self.drop_path(self.gamma_2 * self.mlp(self.norm2(x)))
         return x
 
@@ -198,7 +231,8 @@ class VisionTransformer(nn.Module):
                  init_values=0.,
                  use_learnable_pos_emb=False, 
                  init_scale=0.,
-                 use_mean_pooling=True):
+                 use_mean_pooling=True,
+                 mixer='attn'):
         super().__init__()
         self.num_classes = num_classes
         self.num_features = self.embed_dim = embed_dim  # num_features for consistency with other models
@@ -216,13 +250,12 @@ class VisionTransformer(nn.Module):
 
         self.pos_drop = nn.Dropout(p=drop_rate)
 
-
         dpr = [x.item() for x in torch.linspace(0, drop_path_rate, depth)]  # stochastic depth decay rule
         self.blocks = nn.ModuleList([
             Block(
-                dim=embed_dim, num_heads=num_heads, mlp_ratio=mlp_ratio, qkv_bias=qkv_bias, qk_scale=qk_scale,
+                dim=embed_dim, num_patches=num_patches, num_heads=num_heads, mlp_ratio=mlp_ratio, qkv_bias=qkv_bias, qk_scale=qk_scale,
                 drop=drop_rate, attn_drop=attn_drop_rate, drop_path=dpr[i], norm_layer=norm_layer,
-                init_values=init_values)
+                init_values=init_values, mixer=mixer)
             for i in range(depth)])
         self.norm = nn.Identity() if use_mean_pooling else norm_layer(embed_dim)
         self.fc_norm = norm_layer(embed_dim) if use_mean_pooling else None
