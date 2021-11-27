@@ -64,7 +64,7 @@ class PretrainVisionTransformerEncoder(nn.Module):
                 drop=drop_rate, attn_drop=attn_drop_rate, drop_path=dpr[i], norm_layer=norm_layer,
                 init_values=init_values, mixer=mixer)
             for i in range(depth)])
-        self.norm =  norm_layer(embed_dim)
+        self.norm = norm_layer(embed_dim)
         self.head = nn.Linear(embed_dim, num_classes) if num_classes > 0 else nn.Identity()
 
         if use_learnable_pos_emb:

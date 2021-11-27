@@ -131,10 +131,12 @@ class Mixer(nn.Module):
     tokens_dim = int(mlp_ratio[0] * embed_dim)
     channels_dim = int(mlp_ratio[1] * embed_dim)
 
-    self.norm1 = nn.LayerNorm(embed_dim)
+    norm_layer1 = partial(nn.LayerNorm, eps=1e-6)
+    self.norm1 = norm_layer1(embed_dim)
     self.mlp1 = MixerMLP(nb_patches, tokens_dim)
 
-    self.norm2 = nn.LayerNorm(embed_dim)
+    norm_layer2 = partial(nn.LayerNorm, eps=1e-6)
+    self.norm2 = norm_layer2(embed_dim)
     self.mlp2 = MixerMLP(embed_dim, channels_dim)
 
   def forward(self, x):
