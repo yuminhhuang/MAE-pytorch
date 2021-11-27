@@ -123,7 +123,7 @@ class MixerMLP(nn.Module):
 
 
 class Mixer(nn.Module):
-  def __init__(self, embed_dim, nb_patches, mlp_ratio=(0.5, 4.0)):
+  def __init__(self, embed_dim, nb_patches, norm_layer, mlp_ratio=(0.5, 4.0)):
     super().__init__()
 
     # These represent the hidden dimensions when transforming
@@ -131,12 +131,10 @@ class Mixer(nn.Module):
     tokens_dim = int(mlp_ratio[0] * embed_dim)
     channels_dim = int(mlp_ratio[1] * embed_dim)
 
-    norm_layer1 = partial(nn.LayerNorm, eps=1e-6)
-    self.norm1 = norm_layer1(embed_dim)
+    self.norm1 = norm_layer(embed_dim)
     self.mlp1 = MixerMLP(nb_patches, tokens_dim)
 
-    norm_layer2 = partial(nn.LayerNorm, eps=1e-6)
-    self.norm2 = norm_layer2(embed_dim)
+    self.norm2 = norm_layer(embed_dim)
     self.mlp2 = MixerMLP(embed_dim, channels_dim)
 
   def forward(self, x):
@@ -165,9 +163,9 @@ class AttnMixer(nn.Module):
 
 
 class MlpMixer(nn.Module):
-    def __init__(self, dim, num_patches, mlp_ratio=(0.5, 4.0)):
+    def __init__(self, dim, num_patches, norm_layer, mlp_ratio=(0.5, 4.0)):
         super().__init__()
-        self.mlp = Mixer(embed_dim=dim, nb_patches=num_patches, mlp_ratio=mlp_ratio)
+        self.mlp = Mixer(embed_dim=dim, nb_patches=num_patches, norm_layer=norm_layer, mlp_ratio=mlp_ratio)
 
     def forward(self, x):
         return self.mlp(x)
@@ -198,7 +196,7 @@ class Block(nn.Module):
         if mixer == 'attn':
             self.mixer = AttnMixer(dim=dim, num_heads=num_heads, qkv_bias=qkv_bias, qk_scale=qk_scale, drop=drop, attn_drop=attn_drop, attn_head_dim=attn_head_dim)
         elif mixer == 'mlp':
-            self.mixer = MlpMixer(dim=dim, num_patches=num_patches)
+            self.mixer = MlpMixer(dim=dim, num_patches=num_patches, norm_layer=norm_layer)
         elif mixer == 'pooling':
             self.mixer = PoolingMixer()
 
