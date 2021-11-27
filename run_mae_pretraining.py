@@ -43,7 +43,7 @@ def get_args():
     parser.add_argument('--mask_ratio', default=0.75, type=float,
                         help='ratio of the visual tokens/patches need be masked')
 
-    parser.add_argument('--input_size', default=224, type=int,
+    parser.add_argument('--input_size', default=0, type=int,
                         help='images input size for backbone')
 
     parser.add_argument('--drop_path', type=float, default=0.0, metavar='PCT',
@@ -125,14 +125,23 @@ def get_args():
 
 def get_model(args):
     print(f"Creating model: {args.model}")
-    model = create_model(
-        args.model,
-        pretrained=False,
-        input_size=args.input_size,
-        mixer=args.mixer,
-        drop_path_rate=args.drop_path,
-        drop_block_rate=None,
-    )
+    if not args.input_size:
+        model = create_model(
+            args.model,
+            pretrained=False,
+            mixer=args.mixer,
+            drop_path_rate=args.drop_path,
+            drop_block_rate=None,
+        )
+    else:
+        model = create_model(
+            args.model,
+            pretrained=False,
+            input_size = args.input_size,
+            mixer=args.mixer,
+            drop_path_rate=args.drop_path,
+            drop_block_rate=None,
+        )
 
     return model
 
