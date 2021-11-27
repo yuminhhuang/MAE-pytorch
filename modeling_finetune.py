@@ -107,6 +107,50 @@ class Attention(nn.Module):
         return x
 
 
+class MixerMLP(nn.Module):
+  def __init__(self, in_features, hid_features):
+    super().__init__()
+
+    self.mlp = nn.Sequential(
+        nn.Linear(in_features, hid_features),
+        nn.GELU(),
+        nn.Linear(hid_features, in_features),
+        nn.GELU(),
+    )
+
+  def forward(self, x):
+    return self.mlp(x)
+
+
+class Mixer(nn.Module):
+  def __init__(self, embed_dim, nb_patches, mlp_ratio=(0.5, 4.0)):
+    super().__init__()
+
+    # These represent the hidden dimensions when transforming
+    # the tokens and channels dimensions respectively
+    tokens_dim = int(mlp_ratio[0] * embed_dim)
+    channels_dim = int(mlp_ratio[1] * embed_dim)
+
+    self.norm1 = nn.LayerNorm(embed_dim)
+    self.mlp1 = MixerMLP(nb_patches, tokens_dim)
+
+    self.norm2 = nn.LayerNorm(embed_dim)
+    self.mlp2 = MixerMLP(embed_dim, channels_dim)
+
+  def forward(self, x):
+    res = self.norm1(x)  # B N C
+    res = res.transpose(1, 2)  # B C N
+    res = self.mlp1(res)  # B C N
+    res = res.transpose(1, 2)  # B N C
+    x = x + res
+
+    res = self.norm2(x)  # B N C
+    res = self.mlp2(res)  # B N C
+    x = x + res
+
+    return x
+
+
 class AttnMixer(nn.Module):
     def __init__(self, dim, num_heads, qkv_bias=False, qk_scale=None, drop=0., attn_drop=0., attn_head_dim=None):
         super().__init__()
@@ -119,12 +163,12 @@ class AttnMixer(nn.Module):
 
 
 class MlpMixer(nn.Module):
-    def __init__(self, num_patches, mlp_ratio=4., drop=0., act_layer=nn.GELU):
+    def __init__(self, dim, num_patches, mlp_ratio=(0.5, 4.0)):
         super().__init__()
-        self.mlp = Mlp(in_features=num_patches, hidden_features=int(num_patches * mlp_ratio), act_layer=act_layer, drop=drop)
+        self.mlp = Mixer(embed_dim=dim, nb_patches=num_patches, mlp_ratio=mlp_ratio)
 
     def forward(self, x):
-        return self.mlp(x.transpose(1, 2)).transpose(1, 2)
+        return self.mlp(x)
 
 
 class PoolingMixer(nn.Module):
@@ -152,7 +196,7 @@ class Block(nn.Module):
         if mixer == 'attn':
             self.mixer = AttnMixer(dim=dim, num_heads=num_heads, qkv_bias=qkv_bias, qk_scale=qk_scale, drop=drop, attn_drop=attn_drop, attn_head_dim=attn_head_dim)
         elif mixer == 'mlp':
-            self.mixer = MlpMixer(num_patches=num_patches, mlp_ratio=mlp_ratio, drop=drop, act_layer=act_layer)
+            self.mixer = MlpMixer(dim=dim, num_patches=num_patches)
         elif mixer == 'pooling':
             self.mixer = PoolingMixer()
 
