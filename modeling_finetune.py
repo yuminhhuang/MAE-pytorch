@@ -106,33 +106,6 @@ class Attention(nn.Module):
         x = self.proj_drop(x)
         return x
 
-# class Dropout():
-#     def __init__(self, p=0.5):
-#         super(Dropout, self).__init__()
-#         self.p = p
-#
-#     def _make_noise(self, input):
-#         # generate random signal
-#         return input.new().resize_as_(input)
-#
-#     def forward(self, input):
-#         self.noise = self._make_noise(input)
-#         # multiply mask to input
-#         if self.p == 1:
-#             self.noise.fill_(0)
-#         else:
-#             self.noise.bernoulli_(1 - self.p).div_(1 - self.p)
-#         self.noise = self.noise.expand_as(input)
-#
-#         output = input.clone()
-#
-#         output.mul_(self.noise)
-#
-#         return output
-#
-#     def backward(self, grad_output):
-#         return grad_output.mul(self.noise)
-
 
 class MaskAdapter:
     @staticmethod
@@ -142,14 +115,6 @@ class MaskAdapter:
 
         output = input.new().resize_(B, N, C)
         output[~mask] = input.reshape(-1, C)
-        # for i in range(0, B):
-        #     # nNMap = []
-        #     # for j in range(0, N):
-        #     #     if not mask[i][j]:  # mask: B, N
-        #     #         nNMap.append(j)
-        #     # output[i][nNMap] = input[i]
-        #     output[i][~(mask[i])] = input[i]
-
         return output
 
     @staticmethod
@@ -159,13 +124,6 @@ class MaskAdapter:
 
         output = input[~mask].reshape(B, -1, C)
         return output
-
-    @staticmethod
-    def _make_noise(input, mask):
-        B, C, n = input.size()
-        B, N = mask.size()
-        noise = (~mask).unsqueeze(1).expand((B, C, N))  # B N -> B 1 N -> B C N
-        return input.new(B, C, N).copy_(noise)
 
 
 class MaskedMagnifier(torch.autograd.Function):
@@ -197,8 +155,15 @@ class MaskedMinifier(torch.autograd.Function):
 class MaskedDrop(torch.autograd.Function):
 
     @staticmethod
+    def _make_noise(input, mask):
+        B, C, n = input.size()
+        B, N = mask.size()
+        noise = (~mask).unsqueeze(1).expand((B, C, N))  # B N -> B 1 N -> B C N
+        return input.new(B, C, N).copy_(noise)
+
+    @staticmethod
     def forward(self, input, mask):  # B C n, B N
-        noise = MaskAdapter._make_noise(input, mask)  # B, C, N
+        noise = MaskedDrop._make_noise(input, mask)  # B, C, N
         self.save_for_backward(noise)
         return input.mul(noise)
 
@@ -241,7 +206,6 @@ class SpatialMLP(nn.Module):
         # self.mlp2 = self.MaskedMLP(embed_dim, channels_dim)
 
     def forward(self, x, mask):
-        print('[ym]---------SpatialMLP ', x.shape)
         res = self.norm1(x)  # B N C
         res = MaskedMagnifier.apply(res, mask)
         res = res.transpose(1, 2)  # B C N
