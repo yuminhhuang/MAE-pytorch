@@ -43,6 +43,9 @@ def get_args():
     parser.add_argument('--model', default='deit_base_patch16_224', type=str, metavar='MODEL',
                         help='Name of model to train')
 
+    parser.add_argument('--mixer', default='attn', type=str,
+                        help='token mixer')
+
     parser.add_argument('--input_size', default=224, type=int,
                         help='images input size')
 
@@ -284,6 +287,7 @@ def main(args, ds_init):
     model = create_model(
         args.model,
         pretrained=False,
+        mixer=args.mixer,
         num_classes=args.nb_classes,
         drop_rate=args.drop,
         drop_path_rate=args.drop_path,

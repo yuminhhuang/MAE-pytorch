@@ -452,53 +452,53 @@ class VisionTransformer(nn.Module):
         return x
 
 @register_model
-def vit_small_patch16_224(pretrained=False, **kwargs):
+def vit_small_patch16_224(pretrained=False, mixer='attn', **kwargs):
     model = VisionTransformer(
         patch_size=16, embed_dim=384, depth=12, num_heads=6, mlp_ratio=4, qkv_bias=True,
-        norm_layer=partial(nn.LayerNorm, eps=1e-6), **kwargs)
+        norm_layer=partial(nn.LayerNorm, eps=1e-6), mixer=mixer, **kwargs)
     model.default_cfg = _cfg()
     return model
 
 @register_model
-def vit_base_patch16_224(pretrained=False, **kwargs):
+def vit_base_patch16_224(pretrained=False, mixer='attn', **kwargs):
     model = VisionTransformer(
         patch_size=16, embed_dim=768, depth=12, num_heads=12, mlp_ratio=4, qkv_bias=True,
-        norm_layer=partial(nn.LayerNorm, eps=1e-6), **kwargs)
+        norm_layer=partial(nn.LayerNorm, eps=1e-6), mixer=mixer, **kwargs)
     model.default_cfg = _cfg()
     return model
 
 
 @register_model
-def vit_base_patch16_384(pretrained=False, **kwargs):
+def vit_base_patch16_384(pretrained=False, mixer='attn', **kwargs):
     model = VisionTransformer(
         img_size=384, patch_size=16, embed_dim=768, depth=12, num_heads=12, mlp_ratio=4, qkv_bias=True,
-        norm_layer=partial(nn.LayerNorm, eps=1e-6), **kwargs)
+        norm_layer=partial(nn.LayerNorm, eps=1e-6), mixer=mixer, **kwargs)
     model.default_cfg = _cfg()
     return model
 
 
 @register_model
-def vit_large_patch16_224(pretrained=False, **kwargs):
+def vit_large_patch16_224(pretrained=False, mixer='attn', **kwargs):
     model = VisionTransformer(
         patch_size=16, embed_dim=1024, depth=24, num_heads=16, mlp_ratio=4, qkv_bias=True,
-        norm_layer=partial(nn.LayerNorm, eps=1e-6), **kwargs)
+        norm_layer=partial(nn.LayerNorm, eps=1e-6), mixer=mixer, **kwargs)
     model.default_cfg = _cfg()
     return model
 
 
 @register_model
-def vit_large_patch16_384(pretrained=False, **kwargs):
+def vit_large_patch16_384(pretrained=False, mixer='attn', **kwargs):
     model = VisionTransformer(
         img_size=384, patch_size=16, embed_dim=1024, depth=24, num_heads=16, mlp_ratio=4, qkv_bias=True,
-        norm_layer=partial(nn.LayerNorm, eps=1e-6), **kwargs)
+        norm_layer=partial(nn.LayerNorm, eps=1e-6), mixer=mixer, **kwargs)
     model.default_cfg = _cfg()
     return model
 
 
 @register_model
-def vit_large_patch16_512(pretrained=False, **kwargs):
+def vit_large_patch16_512(pretrained=False, mixer='attn', **kwargs):
     model = VisionTransformer(
         img_size=512, patch_size=16, embed_dim=1024, depth=24, num_heads=16, mlp_ratio=4, qkv_bias=True,
-        norm_layer=partial(nn.LayerNorm, eps=1e-6), **kwargs)
+        norm_layer=partial(nn.LayerNorm, eps=1e-6), mixer=mixer, **kwargs)
     model.default_cfg = _cfg()
     return model
