@@ -60,9 +60,9 @@ class PretrainVisionTransformerEncoder(nn.Module):
         dpr = [x.item() for x in torch.linspace(0, drop_path_rate, depth)]  # stochastic depth decay rule
         self.blocks = nn.ModuleList([
             Block(
-                dim=embed_dim, num_patches=num_patches, num_heads=num_heads, mlp_ratio=mlp_ratio, qkv_bias=qkv_bias, qk_scale=qk_scale,
+                dim=embed_dim, num_heads=num_heads, mlp_ratio=mlp_ratio, qkv_bias=qkv_bias, qk_scale=qk_scale,
                 drop=drop_rate, attn_drop=attn_drop_rate, drop_path=dpr[i], norm_layer=norm_layer,
-                init_values=init_values, mixer=mixer)
+                init_values=init_values, mixer=mixer, num_patches=num_patches)
             for i in range(depth)])
         self.norm = norm_layer(embed_dim)
         self.head = nn.Linear(embed_dim, num_classes) if num_classes > 0 else nn.Identity()
@@ -108,7 +108,7 @@ class PretrainVisionTransformerEncoder(nn.Module):
         x_vis = x[~mask].reshape(B, -1, C) # ~mask means visible
 
         for blk in self.blocks:
-            x_vis = blk(x_vis)
+            x_vis = blk(x_vis, mask)
 
         x_vis = self.norm(x_vis)
         return x_vis
@@ -134,9 +134,9 @@ class PretrainVisionTransformerDecoder(nn.Module):
         dpr = [x.item() for x in torch.linspace(0, drop_path_rate, depth)]  # stochastic depth decay rule
         self.blocks = nn.ModuleList([
             Block(
-                dim=embed_dim, num_patches=num_patches, num_heads=num_heads, mlp_ratio=mlp_ratio, qkv_bias=qkv_bias, qk_scale=qk_scale,
+                dim=embed_dim, num_heads=num_heads, mlp_ratio=mlp_ratio, qkv_bias=qkv_bias, qk_scale=qk_scale,
                 drop=drop_rate, attn_drop=attn_drop_rate, drop_path=dpr[i], norm_layer=norm_layer,
-                init_values=init_values, mixer=mixer)
+                init_values=init_values, mixer=mixer, num_patches=num_patches)
             for i in range(depth)])
         self.norm =  norm_layer(embed_dim)
         self.head = nn.Linear(embed_dim, num_classes) if num_classes > 0 else nn.Identity()
@@ -168,8 +168,10 @@ class PretrainVisionTransformerDecoder(nn.Module):
         self.head = nn.Linear(self.embed_dim, num_classes) if num_classes > 0 else nn.Identity()
 
     def forward(self, x, return_token_num):
+        B, N, _ = x.size()
+        non_mask = torch.zeros(B, N, dtype=torch.bool)
         for blk in self.blocks:
-            x = blk(x)
+            x = blk(x, non_mask)
 
         if return_token_num > 0:
             x = self.head(self.norm(x[:, -return_token_num:])) # only return the mask tokens predict pixels

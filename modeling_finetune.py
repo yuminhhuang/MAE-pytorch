@@ -8,6 +8,7 @@
 import math
 from functools import partial
 import numpy as np
+from einops import rearrange
 
 import torch
 import torch.nn as nn
@@ -97,7 +98,6 @@ class Attention(nn.Module):
         q = q * self.scale
         attn = (q @ k.transpose(-2, -1))
 
-        
         attn = attn.softmax(dim=-1)
         attn = self.attn_drop(attn)
 
@@ -106,49 +106,155 @@ class Attention(nn.Module):
         x = self.proj_drop(x)
         return x
 
+# class Dropout():
+#     def __init__(self, p=0.5):
+#         super(Dropout, self).__init__()
+#         self.p = p
+#
+#     def _make_noise(self, input):
+#         # generate random signal
+#         return input.new().resize_as_(input)
+#
+#     def forward(self, input):
+#         self.noise = self._make_noise(input)
+#         # multiply mask to input
+#         if self.p == 1:
+#             self.noise.fill_(0)
+#         else:
+#             self.noise.bernoulli_(1 - self.p).div_(1 - self.p)
+#         self.noise = self.noise.expand_as(input)
+#
+#         output = input.clone()
+#
+#         output.mul_(self.noise)
+#
+#         return output
+#
+#     def backward(self, grad_output):
+#         return grad_output.mul(self.noise)
 
-class MixerMLP(nn.Module):
-  def __init__(self, in_features, hid_features):
-    super().__init__()
 
-    self.mlp = nn.Sequential(
-        nn.Linear(in_features, hid_features),
-        nn.GELU(),
-        nn.Linear(hid_features, in_features),
-        nn.GELU(),
-    )
+class MaskAdapter:
+    @staticmethod
+    def _magnify(input, mask):
+        B, n, C = input.size()
+        B, N = mask.size()
 
-  def forward(self, x):
-    return self.mlp(x)
+        output = input.new().resize_(B, N, C)
+        output[~mask] = input.reshape(-1, C)
+        # for i in range(0, B):
+        #     # nNMap = []
+        #     # for j in range(0, N):
+        #     #     if not mask[i][j]:  # mask: B, N
+        #     #         nNMap.append(j)
+        #     # output[i][nNMap] = input[i]
+        #     output[i][~(mask[i])] = input[i]
+
+        return output
+
+    @staticmethod
+    def _minify(input, mask):
+        B, N, C = input.size()
+        B, N = mask.size()
+
+        output = input[~mask].reshape(B, -1, C)
+        return output
+
+    @staticmethod
+    def _make_noise(input, mask):
+        B, C, n = input.size()
+        B, N = mask.size()
+        noise = (~mask).unsqueeze(1).expand((B, C, N))  # B N -> B 1 N -> B C N
+        return input.new(B, C, N).copy_(noise)
 
 
-class Mixer(nn.Module):
-  def __init__(self, embed_dim, nb_patches, norm_layer, mlp_ratio=(0.5, 4.0)):
-    super().__init__()
+class MaskedMagnifier(torch.autograd.Function):
 
-    # These represent the hidden dimensions when transforming
-    # the tokens and channels dimensions respectively
-    tokens_dim = int(mlp_ratio[0] * embed_dim)
-    channels_dim = int(mlp_ratio[1] * embed_dim)
+    @staticmethod
+    def forward(self, input, mask):  # B C n, B N
+        self.save_for_backward(mask)
+        return MaskAdapter._magnify(input, mask)
 
-    self.norm1 = norm_layer(embed_dim)
-    self.mlp1 = MixerMLP(nb_patches, tokens_dim)
+    @staticmethod
+    def backward(self, input):
+        mask, = self.saved_tensors
+        return MaskAdapter._minify(input, mask), None
 
-    self.norm2 = norm_layer(embed_dim)
-    self.mlp2 = MixerMLP(embed_dim, channels_dim)
 
-  def forward(self, x):
-    res = self.norm1(x)  # B N C
-    res = res.transpose(1, 2)  # B C N
-    res = self.mlp1(res)  # B C N
-    res = res.transpose(1, 2)  # B N C
-    x = x + res
+class MaskedMinifier(torch.autograd.Function):
 
-    res = self.norm2(x)  # B N C
-    res = self.mlp2(res)  # B N C
-    x = x + res
+    @staticmethod
+    def forward(self, input, mask):  # B C N, B N
+        self.save_for_backward(mask)
+        return MaskAdapter._minify(input, mask)
 
-    return x
+    @staticmethod
+    def backward(self, input):
+        mask, = self.saved_tensors
+        return MaskAdapter._magnify(input, mask), None
+
+
+class MaskedDrop(torch.autograd.Function):
+
+    @staticmethod
+    def forward(self, input, mask):  # B C n, B N
+        noise = MaskAdapter._make_noise(input, mask)  # B, C, N
+        self.save_for_backward(noise)
+        return input.mul(noise)
+
+    @staticmethod
+    def backward(self, input):
+        noise, = self.saved_tensors
+        return input.mul(noise), None  # more clean
+
+
+class SpatialMLP(nn.Module):
+    class MaskedMLP(nn.Module):
+        def __init__(self, in_features, hid_features):
+            super().__init__()
+
+            self.mlp = nn.Sequential(
+                nn.Linear(in_features, hid_features),
+                nn.GELU(),
+                nn.Linear(hid_features, in_features),
+                nn.GELU(),
+            )
+
+        def forward(self, x, mask):
+            x = MaskedDrop.apply(x, mask)
+            x = self.mlp(x)
+            x = MaskedDrop.apply(x, mask)
+            return x
+
+    def __init__(self, embed_dim, nb_patches, norm_layer, mlp_ratio=(0.5, 4.0)):
+        super().__init__()
+
+        # These represent the hidden dimensions when transforming
+        # the tokens and channels dimensions respectively
+        tokens_dim = int(mlp_ratio[0] * embed_dim)
+        # channels_dim = int(mlp_ratio[1] * embed_dim)
+
+        self.norm1 = norm_layer(embed_dim)
+        self.mlp1 = self.MaskedMLP(nb_patches, tokens_dim)
+
+        # self.norm2 = norm_layer(embed_dim)
+        # self.mlp2 = self.MaskedMLP(embed_dim, channels_dim)
+
+    def forward(self, x, mask):
+        print('[ym]---------SpatialMLP ', x.shape)
+        res = self.norm1(x)  # B N C
+        res = MaskedMagnifier.apply(res, mask)
+        res = res.transpose(1, 2)  # B C N
+        res = self.mlp1(res, mask)  # B C N
+        res = res.transpose(1, 2)  # B N C
+        res = MaskedMinifier.apply(res, mask)
+        x = x + res
+
+        # res = self.norm2(x)  # B N C
+        # res = self.mlp2(res)  # B N C
+        # x = x + res
+
+        return x
 
 
 class AttnMixer(nn.Module):
@@ -165,10 +271,10 @@ class AttnMixer(nn.Module):
 class MlpMixer(nn.Module):
     def __init__(self, dim, num_patches, norm_layer, mlp_ratio=(0.5, 4.0)):
         super().__init__()
-        self.mlp = Mixer(embed_dim=dim, nb_patches=num_patches, norm_layer=norm_layer, mlp_ratio=mlp_ratio)
+        self.mlp = SpatialMLP(embed_dim=dim, nb_patches=num_patches, norm_layer=norm_layer, mlp_ratio=mlp_ratio)
 
-    def forward(self, x):
-        return self.mlp(x)
+    def forward(self, x, mask):
+        return self.mlp(x, mask)
 
 
 class PoolingMixer(nn.Module):
@@ -177,15 +283,16 @@ class PoolingMixer(nn.Module):
         self.pool = nn.Pool1d(pool_size, stride=1, padding=pool_size//2, count_include_pad=False)
 
     def forward(self, x):
-        return x  # TODO self.pool(x) - x
+        return self.pool(x) - x
 
 
 class Block(nn.Module):
 
-    def __init__(self, dim, num_patches, num_heads, mlp_ratio=4., qkv_bias=False, qk_scale=None, drop=0., attn_drop=0.,
+    def __init__(self, dim, num_heads, mlp_ratio=4., qkv_bias=False, qk_scale=None, drop=0., attn_drop=0.,
                  drop_path=0., init_values=None, act_layer=nn.GELU, norm_layer=nn.LayerNorm,
-                 attn_head_dim=None, mixer='attn'):
+                 attn_head_dim=None, mixer='attn', num_patches=None):
         super().__init__()
+        self.mixer_name = mixer
         self.norm1 = norm_layer(dim)
         # NOTE: drop path for stochastic depth, we shall see if this is better than dropout here
         self.drop_path = DropPath(drop_path) if drop_path > 0. else nn.Identity()
@@ -193,11 +300,12 @@ class Block(nn.Module):
         mlp_hidden_dim = int(dim * mlp_ratio)
         self.mlp = Mlp(in_features=dim, hidden_features=mlp_hidden_dim, act_layer=act_layer, drop=drop)
 
-        if mixer == 'attn':
+        if self.mixer_name == 'attn':
             self.mixer = AttnMixer(dim=dim, num_heads=num_heads, qkv_bias=qkv_bias, qk_scale=qk_scale, drop=drop, attn_drop=attn_drop, attn_head_dim=attn_head_dim)
-        elif mixer == 'mlp':
+        elif self.mixer_name == 'mlp':
+            assert num_patches, f"MLP Mixer must have num_patches"
             self.mixer = MlpMixer(dim=dim, num_patches=num_patches, norm_layer=norm_layer)
-        elif mixer == 'pooling':
+        elif self.mixer_name == 'pooling':
             self.mixer = PoolingMixer()
 
         if init_values > 0:
@@ -206,13 +314,28 @@ class Block(nn.Module):
         else:
             self.gamma_1, self.gamma_2 = None, None
 
-    def forward(self, x):
-        if self.gamma_1 is None:
-            x = x + self.drop_path(self.mixer(self.norm1(x)))
-            x = x + self.drop_path(self.mlp(self.norm2(x)))
+    def forward(self, x, mask=None):
+
+        g1 = 1
+        if self.gamma_1 is not None:
+            g1 = self.gamma_1
+        g2 = 1
+        if self.gamma_2 is not None:
+            g2 = self.gamma_2
+
+        n1 = self.norm1(x)
+        if self.mixer_name == 'mlp':
+            assert mask is not None, f"MLP Mixer must have mask"
+            mixed = self.mixer(n1, mask)
         else:
-            x = x + self.drop_path(self.gamma_1 * self.mixer(self.norm1(x)))
-            x = x + self.drop_path(self.gamma_2 * self.mlp(self.norm2(x)))
+            mixed = self.mixer(n1)
+        mixed = g1 * mixed
+        x = x + self.drop_path(mixed)
+
+        n2 = self.norm2(x)
+        mlped = g2 * self.mlp(n2)
+        x = x + self.drop_path(mlped)
+
         return x
 
 
@@ -297,9 +420,9 @@ class VisionTransformer(nn.Module):
         dpr = [x.item() for x in torch.linspace(0, drop_path_rate, depth)]  # stochastic depth decay rule
         self.blocks = nn.ModuleList([
             Block(
-                dim=embed_dim, num_patches=num_patches, num_heads=num_heads, mlp_ratio=mlp_ratio, qkv_bias=qkv_bias, qk_scale=qk_scale,
+                dim=embed_dim, num_heads=num_heads, mlp_ratio=mlp_ratio, qkv_bias=qkv_bias, qk_scale=qk_scale,
                 drop=drop_rate, attn_drop=attn_drop_rate, drop_path=dpr[i], norm_layer=norm_layer,
-                init_values=init_values, mixer=mixer)
+                init_values=init_values, mixer=mixer, num_patches=num_patches)
             for i in range(depth)])
         self.norm = nn.Identity() if use_mean_pooling else norm_layer(embed_dim)
         self.fc_norm = norm_layer(embed_dim) if use_mean_pooling else None
@@ -340,7 +463,7 @@ class VisionTransformer(nn.Module):
 
     def forward_features(self, x):
         x = self.patch_embed(x)
-        B, _, _ = x.size()
+        B, N, _ = x.size()
 
         # cls_tokens = self.cls_token.expand(batch_size, -1, -1)  # stole cls_tokens impl from Phil Wang, thanks
         # x = torch.cat((cls_tokens, x), dim=1)
@@ -348,8 +471,9 @@ class VisionTransformer(nn.Module):
             x = x + self.pos_embed.expand(B, -1, -1).type_as(x).to(x.device).clone().detach()
         x = self.pos_drop(x)
 
+        non_mask = torch.zeros(B, N, dtype=torch.bool)
         for blk in self.blocks:
-            x = blk(x)
+            x = blk(x, non_mask)
 
         x = self.norm(x)
         if self.fc_norm is not None:
