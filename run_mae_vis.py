@@ -50,6 +50,9 @@ def get_args():
     # Model parameters
     parser.add_argument('--model', default='pretrain_mae_base_patch16_224', type=str, metavar='MODEL',
                         help='Name of model to vis')
+    parser.add_argument('--mixer', default='attn', type=str,
+                        help='token mixer')
+
     parser.add_argument('--drop_path', type=float, default=0.0, metavar='PCT',
                         help='Drop path rate (default: 0.1)')
     
@@ -62,6 +65,7 @@ def get_model(args):
         args.model,
         pretrained=False,
         input_size=args.input_size,
+        mixer=args.mixer,
         drop_path_rate=args.drop_path,
         drop_block_rate=None,
     )

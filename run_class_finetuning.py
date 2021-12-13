@@ -31,6 +31,7 @@ import utils
 from scipy import interpolate
 import modeling_finetune
 
+from part_loss import *
 
 def get_args():
     parser = argparse.ArgumentParser('MAE fine-tuning and evaluation script for image classification', add_help=False)
@@ -46,8 +47,13 @@ def get_args():
     parser.add_argument('--mixer', default='attn', type=str,
                         help='token mixer')
 
+    parser.add_argument('--masker', default=False, type=bool,
+                        help='loss function')
+
     parser.add_argument('--input_size', default=224, type=int,
                         help='images input size')
+    parser.add_argument('--patch_size', default=16, type=int,
+                        help='images patch size for embedding')
 
     parser.add_argument('--drop', type=float, default=0.0, metavar='PCT',
                         help='Dropout rate (default: 0.)')
@@ -206,6 +212,42 @@ def get_args():
     return parser.parse_args(), ds_init
 
 
+def get_model(args):
+    print(f"Creating model: {args.model}")
+    if args.model == 'vit_base_patch_input':
+        model = create_model(
+            args.model,
+            pretrained=False,
+            img_size=args.input_size,
+            patch_size=args.patch_size,
+            mixer=args.mixer,
+            masker=args.masker,
+            num_classes=args.nb_classes,
+            drop_rate=args.drop,
+            drop_path_rate=args.drop_path,
+            attn_drop_rate=args.attn_drop_rate,
+            drop_block_rate=None,
+            use_mean_pooling=args.use_mean_pooling,
+            init_scale=args.init_scale,
+        )
+    else:
+        model = create_model(
+            args.model,
+            pretrained=False,
+            mixer=args.mixer,
+            masker=args.masker,
+            num_classes=args.nb_classes,
+            drop_rate=args.drop,
+            drop_path_rate=args.drop_path,
+            attn_drop_rate=args.attn_drop_rate,
+            drop_block_rate=None,
+            use_mean_pooling=args.use_mean_pooling,
+            init_scale=args.init_scale,
+        )
+
+    return model
+
+
 def main(args, ds_init):
     utils.init_distributed_mode(args)
 
@@ -284,18 +326,11 @@ def main(args, ds_init):
             prob=args.mixup_prob, switch_prob=args.mixup_switch_prob, mode=args.mixup_mode,
             label_smoothing=args.smoothing, num_classes=args.nb_classes)
 
-    model = create_model(
-        args.model,
-        pretrained=False,
-        mixer=args.mixer,
-        num_classes=args.nb_classes,
-        drop_rate=args.drop,
-        drop_path_rate=args.drop_path,
-        attn_drop_rate=args.attn_drop_rate,
-        drop_block_rate=None,
-        use_mean_pooling=args.use_mean_pooling,
-        init_scale=args.init_scale,
-    )
+    model = get_model(args)
+    masker_model = None
+    if args.masker:
+        masker_model = MaskerModel(patch_size=args.patch_size)
+        masker_model.to(device)
 
     patch_size = model.patch_embed.patch_size
     print("Patch size = %s" % str(patch_size))
@@ -467,6 +502,7 @@ def main(args, ds_init):
             log_writer=log_writer, start_steps=epoch * num_training_steps_per_epoch,
             lr_schedule_values=lr_schedule_values, wd_schedule_values=wd_schedule_values,
             num_training_steps_per_epoch=num_training_steps_per_epoch, update_freq=args.update_freq,
+            masker=args.masker, masker_model=masker_model,
         )
         if args.output_dir and args.save_ckpt:
             if (epoch + 1) % args.save_ckpt_freq == 0 or epoch + 1 == args.epochs:

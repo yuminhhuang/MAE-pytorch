@@ -10,17 +10,32 @@ import sys
 from typing import Iterable, Optional
 
 import torch
+from einops import rearrange
 
 from timm.data import Mixup
 from timm.utils import accuracy, ModelEma
 
 import utils
+from part_loss import *
 
 
-def train_class_batch(model, samples, target, criterion):
-    outputs = model(samples)
-    loss = criterion(outputs, target)
-    return loss, outputs
+def train_class_batch(model, samples, target, criterion, masker, masker_model):
+    if masker:
+        masker_model.eval()
+        feature, img = masker_model(samples)
+        mask = model(samples)
+        mask = mask.transpose(1, 2)
+        feature = rearrange(feature, 'B C H W -> B (H W) C')
+        # print('[ym]----------samples.shape', samples.shape)
+        # print('[ym]----------feature.shape', feature.shape)
+        # print('[ym]----------img.shape', img.shape)
+        # print('[ym]----------mask.shape', mask.shape)
+        loss = part_loss(feature, img, mask)  # FIXME gradient explosion
+        return loss, None
+    else:
+        outputs = model(samples)
+        loss = criterion(outputs, target)
+        return loss, outputs
 
 
 def get_loss_scale_for_deepspeed(model):
@@ -33,7 +48,7 @@ def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
                     device: torch.device, epoch: int, loss_scaler, max_norm: float = 0,
                     model_ema: Optional[ModelEma] = None, mixup_fn: Optional[Mixup] = None, log_writer=None,
                     start_steps=None, lr_schedule_values=None, wd_schedule_values=None,
-                    num_training_steps_per_epoch=None, update_freq=None):
+                    num_training_steps_per_epoch=None, update_freq=None, masker=False, masker_model=None):
     model.train(True)
     metric_logger = utils.MetricLogger(delimiter="  ")
     metric_logger.add_meter('lr', utils.SmoothedValue(window_size=1, fmt='{value:.6f}'))
@@ -69,11 +84,11 @@ def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
         if loss_scaler is None:
             samples = samples.half()
             loss, output = train_class_batch(
-                model, samples, targets, criterion)
+                model, samples, targets, criterion, masker, masker_model)
         else:
             with torch.cuda.amp.autocast():
                 loss, output = train_class_batch(
-                    model, samples, targets, criterion)
+                    model, samples, targets, criterion, masker, masker_model)
 
         loss_value = loss.item()
 

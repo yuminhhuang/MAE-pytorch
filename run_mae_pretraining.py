@@ -45,6 +45,8 @@ def get_args():
 
     parser.add_argument('--input_size', default=224, type=int,
                         help='images input size for backbone')
+    parser.add_argument('--patch_size', default=16, type=int,
+                        help='images patch size for embedding')
 
     parser.add_argument('--drop_path', type=float, default=0.0, metavar='PCT',
                         help='Drop path rate (default: 0.1)')
@@ -125,11 +127,12 @@ def get_args():
 
 def get_model(args):
     print(f"Creating model: {args.model}")
-    if args.model == 'pretrain_mae_base_patch16_input':
+    if args.model == 'pretrain_mae_base_patch_input':
         model = create_model(
             args.model,
             pretrained=False,
-            input_size=args.input_size,
+            img_size=args.input_size,
+            patch_size=args.patch_size,
             mixer=args.mixer,
             drop_path_rate=args.drop_path,
             drop_block_rate=None,

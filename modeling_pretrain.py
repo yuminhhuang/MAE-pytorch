@@ -23,7 +23,7 @@ def trunc_normal_(tensor, mean=0., std=1.):
 
 __all__ = [
     'pretrain_mae_base_patch16_224',
-    'pretrain_mae_base_patch16_input',
+    'pretrain_mae_base_patch_input',
     'pretrain_mae_large_patch16_224', 
 ]
 
@@ -340,10 +340,10 @@ def pretrain_mae_base_patch16_224(pretrained=False, mixer='attn', **kwargs):
     return model
 
 @register_model
-def pretrain_mae_base_patch16_input(pretrained=False, input_size=224, mixer='attn', **kwargs):
+def pretrain_mae_base_patch_input(pretrained=False, img_size=224, patch_size=16, mixer='attn', **kwargs):
     model = PretrainVisionTransformer(
-        img_size=input_size,
-        patch_size=16,
+        img_size=img_size,
+        patch_size=patch_size,
         encoder_embed_dim=768,
         encoder_depth=12,
         encoder_num_heads=12,

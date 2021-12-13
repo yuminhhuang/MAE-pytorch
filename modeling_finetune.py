@@ -344,7 +344,7 @@ def get_sinusoid_encoding_table(n_position, d_hid):
 class VisionTransformer(nn.Module):
     """ Vision Transformer with support for patch or hybrid CNN input stage
     """
-    def __init__(self, 
+    def __init__(self,
                  img_size=224, 
                  patch_size=16, 
                  in_chans=3, 
@@ -363,9 +363,13 @@ class VisionTransformer(nn.Module):
                  use_learnable_pos_emb=False, 
                  init_scale=0.,
                  use_mean_pooling=True,
-                 mixer='attn'):
+                 mixer='attn',
+                 masker=False,
+                 masker_K=10):
         super().__init__()
         self.num_classes = num_classes
+        self.masker_K = masker_K
+        self.masker = masker
         self.num_features = self.embed_dim = embed_dim  # num_features for consistency with other models
 
         self.patch_embed = PatchEmbed(
@@ -390,17 +394,23 @@ class VisionTransformer(nn.Module):
             for i in range(depth)])
         self.norm = nn.Identity() if use_mean_pooling else norm_layer(embed_dim)
         self.fc_norm = norm_layer(embed_dim) if use_mean_pooling else None
-        self.head = nn.Linear(embed_dim, num_classes) if num_classes > 0 else nn.Identity()
+
+        if not (num_classes > 0 or masker_K > 0):
+            self.head = nn.Identity()
+        else:
+            if masker:
+                self.head = nn.Linear(embed_dim, masker_K)
+            else:
+                self.head = nn.Linear(embed_dim, num_classes)
+            trunc_normal_(self.head.weight, std=.02)
+            self.head.weight.data.mul_(init_scale)
+            self.head.bias.data.mul_(init_scale)
 
         if use_learnable_pos_emb:
             trunc_normal_(self.pos_embed, std=.02)
 
         # trunc_normal_(self.cls_token, std=.02)
-        trunc_normal_(self.head.weight, std=.02)
         self.apply(self._init_weights)
-
-        self.head.weight.data.mul_(init_scale)
-        self.head.bias.data.mul_(init_scale)
 
     def _init_weights(self, m):
         if isinstance(m, nn.Linear):
@@ -440,65 +450,80 @@ class VisionTransformer(nn.Module):
             x = blk(x, non_mask)
 
         x = self.norm(x)
-        if self.fc_norm is not None:
-            # return self.fc_norm(x[:, 1:].mean(1))
-            return self.fc_norm(x.mean(1))
+
+        if self.masker:
+            return x
         else:
-            return x[:, 0]
+            if self.fc_norm is not None:
+                # return self.fc_norm(x[:, 1:].mean(1))
+                return self.fc_norm(x.mean(1))
+            else:
+                return x[:, 0]
 
     def forward(self, x):
         x = self.forward_features(x)
         x = self.head(x)
         return x
 
+
 @register_model
-def vit_small_patch16_224(pretrained=False, mixer='attn', **kwargs):
+def vit_small_patch16_224(pretrained=False, mixer='attn', masker=False, **kwargs):
     model = VisionTransformer(
         patch_size=16, embed_dim=384, depth=12, num_heads=6, mlp_ratio=4, qkv_bias=True,
-        norm_layer=partial(nn.LayerNorm, eps=1e-6), mixer=mixer, **kwargs)
+        norm_layer=partial(nn.LayerNorm, eps=1e-6), mixer=mixer, masker=masker, **kwargs)
     model.default_cfg = _cfg()
     return model
 
+
 @register_model
-def vit_base_patch16_224(pretrained=False, mixer='attn', **kwargs):
+def vit_base_patch16_224(pretrained=False, mixer='attn', masker=False, **kwargs):
     model = VisionTransformer(
         patch_size=16, embed_dim=768, depth=12, num_heads=12, mlp_ratio=4, qkv_bias=True,
-        norm_layer=partial(nn.LayerNorm, eps=1e-6), mixer=mixer, **kwargs)
+        norm_layer=partial(nn.LayerNorm, eps=1e-6), mixer=mixer, masker=masker, **kwargs)
     model.default_cfg = _cfg()
     return model
 
 
 @register_model
-def vit_base_patch16_384(pretrained=False, mixer='attn', **kwargs):
+def vit_base_patch_input(pretrained=False, img_size=224, patch_size=16, mixer='attn', masker=False, **kwargs):
+    model = VisionTransformer(
+        img_size=img_size, patch_size=patch_size, embed_dim=768, depth=12, num_heads=12, mlp_ratio=4, qkv_bias=True,
+        norm_layer=partial(nn.LayerNorm, eps=1e-6), mixer=mixer, masker=masker, **kwargs)
+    model.default_cfg = _cfg()
+    return model
+
+
+@register_model
+def vit_base_patch16_384(pretrained=False, mixer='attn', masker=False, **kwargs):
     model = VisionTransformer(
         img_size=384, patch_size=16, embed_dim=768, depth=12, num_heads=12, mlp_ratio=4, qkv_bias=True,
-        norm_layer=partial(nn.LayerNorm, eps=1e-6), mixer=mixer, **kwargs)
+        norm_layer=partial(nn.LayerNorm, eps=1e-6), mixer=mixer, masker=masker, **kwargs)
     model.default_cfg = _cfg()
     return model
 
 
 @register_model
-def vit_large_patch16_224(pretrained=False, mixer='attn', **kwargs):
+def vit_large_patch16_224(pretrained=False, mixer='attn', masker=False, **kwargs):
     model = VisionTransformer(
         patch_size=16, embed_dim=1024, depth=24, num_heads=16, mlp_ratio=4, qkv_bias=True,
-        norm_layer=partial(nn.LayerNorm, eps=1e-6), mixer=mixer, **kwargs)
+        norm_layer=partial(nn.LayerNorm, eps=1e-6), mixer=mixer, masker=masker, **kwargs)
     model.default_cfg = _cfg()
     return model
 
 
 @register_model
-def vit_large_patch16_384(pretrained=False, mixer='attn', **kwargs):
+def vit_large_patch16_384(pretrained=False, mixer='attn', masker=False, **kwargs):
     model = VisionTransformer(
         img_size=384, patch_size=16, embed_dim=1024, depth=24, num_heads=16, mlp_ratio=4, qkv_bias=True,
-        norm_layer=partial(nn.LayerNorm, eps=1e-6), mixer=mixer, **kwargs)
+        norm_layer=partial(nn.LayerNorm, eps=1e-6), mixer=mixer, masker=masker, **kwargs)
     model.default_cfg = _cfg()
     return model
 
 
 @register_model
-def vit_large_patch16_512(pretrained=False, mixer='attn', **kwargs):
+def vit_large_patch16_512(pretrained=False, mixer='attn', masker=False, **kwargs):
     model = VisionTransformer(
         img_size=512, patch_size=16, embed_dim=1024, depth=24, num_heads=16, mlp_ratio=4, qkv_bias=True,
-        norm_layer=partial(nn.LayerNorm, eps=1e-6), mixer=mixer, **kwargs)
+        norm_layer=partial(nn.LayerNorm, eps=1e-6), mixer=mixer, masker=masker, **kwargs)
     model.default_cfg = _cfg()
     return model
